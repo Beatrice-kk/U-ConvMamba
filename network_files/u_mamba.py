@@ -44,7 +44,9 @@ class MambaConvBlock(nn.Module):
       
       # 2. Mamba 部分 (Global Context Modeling)
       # 在 CNN 块的输出维度上应用 VSSBlock
-      self.mamba_block = VSSBlock(dim=out_channels) 
+      # 这里 channel_first=True，因为输入是 (B, C, H, W)
+      # FORWARD_TYPES 字典中存在的键。
+      self.mamba_block = VSSBlock(hidden_dim=out_channels,channel_first=True,forward_type='v03') 
 
    def forward(self, x):
       # 1. CNN 提取局部特征
@@ -75,8 +77,16 @@ class Up_Mamba(nn.Module):
          # 拼接后输入通道数仍为 in_channels
          self.conv = MambaConvBlock(in_channels, out_channels, dropout_prob, in_channels // 2) 
       else:
-         self.up = nn.ConvTranspose2d(in_channels, out_channels // 2, kernel_size=2, stride=2)
-         self.conv = MambaConvBlock(in_channels, out_channels, dropout_prob)
+         # 对于转置卷积，其输入通道数是上一层(更深层)的输出通道数，输出通道数通常是当前层的一半
+         # 例如 up1: in_channels=1024, out_channels=512。上一层输出是512。
+         # 所以转置卷积的输入是512，输出是256
+         prev_level_channels = in_channels - (out_channels * 2) # 这是来自跳跃连接的通道数
+         if prev_level_channels < 0: # 瓶颈层特殊处理
+             prev_level_channels = in_channels // 2
+         
+         self.up = nn.ConvTranspose2d(prev_level_channels, prev_level_channels // 2, kernel_size=2, stride=2)
+         self.conv = MambaConvBlock(in_channels - prev_level_channels + (prev_level_channels // 2), out_channels, dropout_prob)
+
 
    def forward(self, x1, x2):
       # x1 是来自瓶颈层或下层解码器的特征
@@ -105,7 +115,7 @@ class U_Mamba_net(nn.Module):
    '''
    U-Net 结合 Mamba 模块的混合结构 (仿 U-Mamba/VM-UNet 思想)
    '''
-   def __init__(self, in_channels, out_channels, bilinear=True, base_channel=64, dropout_prob=0.0):
+   def __init__(self, in_channels, out_channels, bilinear=True, base_channel=32, dropout_prob=0.0):
       super(U_Mamba_net, self).__init__()
       self.in_channels = in_channels
       self.out_channels = out_channels

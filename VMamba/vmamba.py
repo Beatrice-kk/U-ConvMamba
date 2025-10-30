@@ -1170,30 +1170,34 @@ class Mlp(nn.Module):
 class mamba_init:
     @staticmethod
     def dt_init(dt_rank, d_inner, dt_scale=1.0, dt_init="random", dt_min=0.001, dt_max=0.1, dt_init_floor=1e-4):
-        dt_proj = nn.Linear(dt_rank, d_inner, bias=True)
+      dt_proj = nn.Linear(dt_rank, d_inner, bias=True)
+      
+      # 防御性编程，避免 dt_rank=0 导致报错
+      if dt_rank == 0:
+         dt_rank = 1
+  
+      # Initialize special dt projection to preserve variance at initialization
+      dt_init_std = dt_rank**-0.5 * dt_scale
+      if dt_init == "constant":
+         nn.init.constant_(dt_proj.weight, dt_init_std)
+      elif dt_init == "random":
+         nn.init.uniform_(dt_proj.weight, -dt_init_std, dt_init_std)
+      else:
+         raise NotImplementedError
 
-        # Initialize special dt projection to preserve variance at initialization
-        dt_init_std = dt_rank**-0.5 * dt_scale
-        if dt_init == "constant":
-            nn.init.constant_(dt_proj.weight, dt_init_std)
-        elif dt_init == "random":
-            nn.init.uniform_(dt_proj.weight, -dt_init_std, dt_init_std)
-        else:
-            raise NotImplementedError
-
-        # Initialize dt bias so that F.softplus(dt_bias) is between dt_min and dt_max
-        dt = torch.exp(
-            torch.rand(d_inner) * (math.log(dt_max) - math.log(dt_min))
-            + math.log(dt_min)
-        ).clamp(min=dt_init_floor)
-        # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
-        inv_dt = dt + torch.log(-torch.expm1(-dt))
-        with torch.no_grad():
-            dt_proj.bias.copy_(inv_dt)
-        # Our initialization would set all Linear.bias to zero, need to mark this one as _no_reinit
-        # dt_proj.bias._no_reinit = True
-        
-        return dt_proj
+      # Initialize dt bias so that F.softplus(dt_bias) is between dt_min and dt_max
+      dt = torch.exp(
+         torch.rand(d_inner) * (math.log(dt_max) - math.log(dt_min))
+         + math.log(dt_min)
+      ).clamp(min=dt_init_floor)
+      # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
+      inv_dt = dt + torch.log(-torch.expm1(-dt))
+      with torch.no_grad():
+         dt_proj.bias.copy_(inv_dt)
+      # Our initialization would set all Linear.bias to zero, need to mark this one as _no_reinit
+      # dt_proj.bias._no_reinit = True
+      
+      return dt_proj
 
     @staticmethod
     def A_log_init(d_state, d_inner, copies=-1, device=None, merge=True):
@@ -1455,13 +1459,14 @@ class SS2Dv2:
         # conv =======================================
         if self.with_dconv:
             self.conv2d = nn.Conv2d(
-                in_channels=self.d_inner,
-                out_channels=self.d_inner,
+               in_channels=self.d_inner,
+               out_channels=self.d_inner,
                 groups=self.d_inner,
-                bias=conv_bias,
-                kernel_size=d_conv,
-                padding=(d_conv - 1) // 2,
-                **factory_kwargs,
+               # groups=max(1, self.d_inner),
+               bias=conv_bias,
+               kernel_size=d_conv,
+               padding=(d_conv - 1) // 2,
+               **factory_kwargs,
             )
 
         # x proj ============================

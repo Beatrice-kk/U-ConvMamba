@@ -1,4 +1,6 @@
-from network_files.u_net import U_net
+# from network_files.u_net import U_net
+from network_files.u_mamba import U_Mamba_net
+
 from utils import transforms as T
 from My_Dataset import My_Dataset
 from utils import Loss
@@ -154,7 +156,7 @@ def main():
    print(torch.cuda.is_available())
 
    #超参数设置
-   batch_size= 8
+   batch_size= 2
    epoch = 20
    num_classes = 2
    if num_classes == 2:
@@ -171,7 +173,8 @@ def main():
    val_loader = DataLoader(val_dataset,batch_size=batch_size,shuffle=True)
    
    # 创建模型
-   model = U_net(3,num_classes)
+   # model = U_net(3,num_classes)
+   model = U_Mamba_net(3,num_classes)
    model.to(device)
    params = [p for p in model.parameters() if p.requires_grad]
    sgd = optim.SGD(params,lr=0.01,momentum=0.9,weight_decay=1e-4)
